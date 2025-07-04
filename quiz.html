@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz - Compétition en Ligne</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header>
+        <h1>Quiz <span id="nom-thematique-quiz"></span></h1>
+    </header>
+    <main>
+        <section id="connexion-quiz">
+            <p>Entrez votre code unique pour commencer.</p>
+            <form id="form-connexion-quiz">
+                <label for="code-quiz">Code d'accès :</label>
+                <input type="text" id="code-quiz" name="code-quiz" required>
+                <button type="submit">Vérifier le code</button>
+            </form>
+            <p id="message-erreur-code" class="erreur"></p>
+        </section>
+
+        <section id="espace-quiz" style="display:none;">
+            <div id="infos-quiz">
+                <p>Thématique : <span id="thematique-quiz-valeur"></span></p>
+                <p>Temps restant : <span id="chronometre">04:00</span></p>
+            </div>
+            <button id="btn-commencer-quiz">Commencer le Quiz</button>
+            <div id="questions-quiz" style="display:none;">
+                <!-- Les questions seront chargées ici par JavaScript -->
+            </div>
+            <button id="btn-terminer-quiz" style="display:none;">Terminer le Quiz</button>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2023 Compétition en Ligne</p>
+    </footer>
+    <script src="js/quiz.js"></script>
+</body>
+</html>

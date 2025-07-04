@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inscription - Compétition en Ligne</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header>
+        <h1>Inscription à la Thématique</h1>
+    </header>
+    <main>
+        <section id="formulaire-inscription">
+            <h2 id="thematique-choisie">Thématique : </h2>
+            <form id="inscriptionForm" action="php/inscription.php" method="POST">
+                <input type="hidden" id="thematique" name="thematique" value="">
+
+                <label for="nom">Nom complet :</label>
+                <input type="text" id="nom" name="nom" required>
+
+                <label for="telephone">Téléphone :</label>
+                <input type="tel" id="telephone" name="telephone" required>
+
+                <label for="adresse">Adresse :</label>
+                <textarea id="adresse" name="adresse" required></textarea>
+
+                <button type="submit">S'inscrire</button>
+            </form>
+        </section>
+        <section id="confirmation-inscription" style="display:none;">
+            <h2>Inscription Réussie !</h2>
+            <p>Votre code unique pour accéder au quiz est : <strong id="code-unique"></strong></p>
+            <p>Conservez-le précieusement.</p>
+            <p><a href="index.html">Retour à l'accueil</a></p>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2023 Compétition en Ligne</p>
+    </footer>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const urlParams = new URLSearchParams(window.location.search);
+            const thematique = urlParams.get('thematique');
+            const thematiqueChoisieElement = document.getElementById('thematique-choisie');
+            const thematiqueInputElement = document.getElementById('thematique');
+            const inscriptionForm = document.getElementById('inscriptionForm');
+            const sectionFormulaire = document.getElementById('formulaire-inscription');
+            const sectionConfirmation = document.getElementById('confirmation-inscription');
+            const codeUniqueElement = document.getElementById('code-unique');
+
+            if (thematique && thematiqueChoisieElement && thematiqueInputElement) {
+                thematiqueChoisieElement.textContent = "Thématique : " + decodeURIComponent(thematique);
+                thematiqueInputElement.value = thematique;
+            } else {
+                // Rediriger si aucune thématique n'est sélectionnée ou si les éléments n'existent pas
+                // window.location.href = 'index.html';
+                // Il est préférable d'afficher un message ou de gérer autrement si les éléments sont manquants
+                // Pour l'instant, on suppose qu'ils existent toujours si la page est chargée.
+                if (!thematique) {
+                    alert("Aucune thématique sélectionnée. Vous allez être redirigé vers l'accueil.");
+                    window.location.href = 'index.html';
+                }
+            }
+
+            if (inscriptionForm) {
+                inscriptionForm.addEventListener('submit', function (event) {
+                    event.preventDefault(); // Empêcher la soumission standard du formulaire
+
+                    const formData = new FormData(inscriptionForm);
+
+                    fetch('php/inscription.php', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            if (codeUniqueElement) {
+                                codeUniqueElement.textContent = data.codeUnique;
+                            }
+                            if (sectionFormulaire) {
+                                sectionFormulaire.style.display = 'none';
+                            }
+                            if (sectionConfirmation) {
+                                sectionConfirmation.style.display = 'block';
+                            }
+                        } else {
+                            alert('Erreur lors de l\'inscription : ' + data.message);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Erreur:', error);
+                        alert('Une erreur technique est survenue.');
+                    });
+                });
+            }
+        });
+    </script>
+</body>
+</html>
