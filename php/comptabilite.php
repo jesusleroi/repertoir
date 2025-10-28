@@ -1,5 +1,53 @@
 <?php
 // comptabilite_tresorerie.php - Gestion de la comptabilité et trésorerie
+
+// Enregistrement léger côté serveur (JSON dans ../data/operations.json) pour la modale simple
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && isset($_POST['date_op'], $_POST['type_op'], $_POST['libelle'], $_POST['montant'])) {
+    header('Content-Type: application/json; charset=utf-8');
+
+    $date = trim($_POST['date_op']);
+    $type = $_POST['type_op'] === 'sortie' ? 'sortie' : 'entree';
+    $libelle = trim($_POST['libelle']);
+    $montant = floatval($_POST['montant']);
+    $notes = isset($_POST['notes']) ? trim($_POST['notes']) : '';
+    $numero_piece = isset($_POST['numero_piece']) ? trim($_POST['numero_piece']) : '';
+
+    if ($date === '' || $libelle === '' || $montant <= 0) {
+        echo json_encode(['success' => false, 'message' => "Champs requis manquants ou montant invalide."]);
+        exit;
+    }
+
+    $file = dirname(__DIR__) . '/data/operations.json';
+    $ops = [];
+    if (file_exists($file)) {
+        $raw = file_get_contents($file);
+        if ($raw !== false && trim($raw) !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) $ops = $decoded;
+        }
+    }
+
+    $op = [
+        'id' => uniqid('op_', true),
+        'date_operation' => $date,
+        'type_operation' => $type,
+        'libelle' => $libelle,
+        'montant' => $montant,
+        'numero_piece' => $numero_piece,
+        'notes' => $notes,
+        'created_at' => date('Y-m-d H:i:s')
+    ];
+    $ops[] = $op;
+
+    if (file_put_contents($file, json_encode($ops, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE))) {
+        echo json_encode(['success' => true, 'operation' => $op]);
+    } else {
+        echo json_encode(['success' => false, 'message' => "Impossible d'enregistrer l'opération."]);
+    }
+    exit;
+}
+
 session_start();
 require_once 'connexion_bdd.php';
 // Configuration de la devise guinéenne
@@ -1626,7 +1674,7 @@ try {
                     </div>
                 </div>
                 
-                <form method="POST" class="p-6">
+                <form method="POST" class="p-6" id="formTresorerieSimple">
                     <input type="hidden" name="action" value="ajouter_tresorerie">
                     
                     <div class="grid grid-cols-2 gap-4 mb-4">
@@ -1658,15 +1706,7 @@ try {
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Moyen de paiement <span class="text-red-500">*</span></label>
-                            <select name="moyen_paiement_id" required 
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <?php foreach ($moyens_paiement as $moyen): ?>
-                                    <option value="<?= $moyen['id'] ?>"><?= $moyen['nom'] ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
+                        
                     </div>
                     
                     <div class="grid grid-cols-2 gap-4 mb-4">
@@ -1675,20 +1715,7 @@ try {
                             <input type="number" name="montant" step="0.01" min="0.01" required 
                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Catégorie <span class="text-red-500">*</span></label>
-                            <select name="categorie" required 
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="scolarite">Scolarité</option>
-                                <option value="subventions">Subventions</option>
-                                <option value="donations">Donations</option>
-                                <option value="fournitures">Fournitures</option>
-                                <option value="salaires">Salaires</option>
-                                <option value="charges">Charges</option>
-                                <option value="investissements">Investissements</option>
-                                <option value="autre">Autre</option>
-                            </select>
-                        </div>
+                        
                     </div>
                     
                     <div class="mb-4">
@@ -1703,11 +1730,7 @@ try {
                             <input type="text" name="numero_piece" 
                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Bénéficiaire</label>
-                            <input type="text" name="beneficiaire" 
-                                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        </div>
+                        
                     </div>
                     
                     <div class="flex justify-end space-x-3">
@@ -2742,6 +2765,46 @@ function setupDualAccountFields() {
 // Initialisation: injecter les nouveaux champs à l'ouverture de la page
 document.addEventListener('DOMContentLoaded', function () {
     setupDualAccountFields();
+});
+</script>
+<script>
+// Soumission AJAX de la modale Trésorerie vers stockage JSON côté serveur
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('formTresorerieSimple');
+    if (!form) return;
+    form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const fd = new FormData(form);
+        // Mapper les champs du formulaire existant vers l'API JSON simple
+        const payload = new FormData();
+        payload.set('date_op', fd.get('date_operation') || '');
+        payload.set('type_op', fd.get('type_operation') || 'entree');
+        payload.set('libelle', fd.get('libelle') || '');
+        payload.set('montant', fd.get('montant') || '');
+        payload.set('numero_piece', fd.get('numero_piece') || '');
+        // notes optionnel (non présent dans le formulaire)
+        payload.set('notes', '');
+
+        try {
+            const resp = await fetch('comptabilite.php', {
+                method: 'POST',
+                body: payload
+            });
+            const data = await resp.json();
+            if (data && data.success) {
+                alert('Opération enregistrée.');
+                form.reset();
+                fermerModalTresorerie && fermerModalTresorerie();
+                // Optionnel: recharger pour rafraîchir l'historique si alimenté par DB
+                // location.reload();
+            } else {
+                alert('Erreur: ' + (data && data.message ? data.message : 'Enregistrement impossible.'));
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Une erreur technique est survenue.');
+        }
+    });
 });
 </script>
 </body>
