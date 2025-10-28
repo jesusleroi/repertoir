@@ -1,53 +1,5 @@
 <?php
 // comptabilite_tresorerie.php - Gestion de la comptabilité et trésorerie
-
-// Enregistrement léger côté serveur (JSON dans ../data/operations.json) pour la modale simple
-if ($_SERVER['REQUEST_METHOD'] === 'POST'
-    && isset($_POST['date_op'], $_POST['type_op'], $_POST['libelle'], $_POST['montant'])) {
-    header('Content-Type: application/json; charset=utf-8');
-
-    $date = trim($_POST['date_op']);
-    $type = $_POST['type_op'] === 'sortie' ? 'sortie' : 'entree';
-    $libelle = trim($_POST['libelle']);
-    $montant = floatval($_POST['montant']);
-    $notes = isset($_POST['notes']) ? trim($_POST['notes']) : '';
-    $numero_piece = isset($_POST['numero_piece']) ? trim($_POST['numero_piece']) : '';
-
-    if ($date === '' || $libelle === '' || $montant <= 0) {
-        echo json_encode(['success' => false, 'message' => "Champs requis manquants ou montant invalide."]);
-        exit;
-    }
-
-    $file = dirname(__DIR__) . '/data/operations.json';
-    $ops = [];
-    if (file_exists($file)) {
-        $raw = file_get_contents($file);
-        if ($raw !== false && trim($raw) !== '') {
-            $decoded = json_decode($raw, true);
-            if (is_array($decoded)) $ops = $decoded;
-        }
-    }
-
-    $op = [
-        'id' => uniqid('op_', true),
-        'date_operation' => $date,
-        'type_operation' => $type,
-        'libelle' => $libelle,
-        'montant' => $montant,
-        'numero_piece' => $numero_piece,
-        'notes' => $notes,
-        'created_at' => date('Y-m-d H:i:s')
-    ];
-    $ops[] = $op;
-
-    if (file_put_contents($file, json_encode($ops, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE))) {
-        echo json_encode(['success' => true, 'operation' => $op]);
-    } else {
-        echo json_encode(['success' => false, 'message' => "Impossible d'enregistrer l'opération."]);
-    }
-    exit;
-}
-
 session_start();
 require_once 'connexion_bdd.php';
 // Configuration de la devise guinéenne
@@ -212,13 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new Exception("Le montant doit être positif");
                     }
 
-                    // Type d'opération (par défaut 'entree')
-                    $type_operation = $_POST['type_operation'] ?? 'entree';
-                    if (!in_array($type_operation, ['entree', 'sortie'], true)) {
-                        $type_operation = 'entree';
-                    }
-
-                    // Nouveaux champs: compte_debit et compte_credit (exigés pour la saisie)
+                    // Comptes saisis
                     $compte_debit = !empty($_POST['compte_debit']) ? (int)$_POST['compte_debit'] : null;
                     $compte_credit = !empty($_POST['compte_credit']) ? (int)$_POST['compte_credit'] : null;
 
@@ -226,74 +172,90 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new Exception("Veuillez sélectionner un compte débité et un compte crédité.");
                     }
 
-                    // Identifier le compte de trésorerie (classe 5*) à utiliser pour la table tresorerie.compte_id
-                    $tres_compte_id = null;
-                    try {
-                        $stmt = $pdo->prepare("SELECT id, numero_compte FROM comptes_comptables WHERE id IN (?, ?)");
-                        $stmt->execute([$compte_debit, $compte_credit]);
-                        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                        foreach ($rows as $r) {
-                            if (isset($r['numero_compte']) && preg_match('/^5[0-9]{5}$/', $r['numero_compte'])) {
-                                $tres_compte_id = (int)$r['id'];
-                                break;
-                            }
+                    // Récupérer les numéros de compte pour savoir s'ils sont de classe 5 (Banque/Caisse)
+                    $stmt = $pdo->prepare("SELECT id, numero_compte FROM comptes_comptables WHERE id IN (?, ?)");
+                    $stmt->execute([$compte_debit, $compte_credit]);
+                    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    $is5_debit = false;
+                    $is5_credit = false;
+                    foreach ($rows as $r) {
+                        if ((int)$r['id'] === $compte_debit && isset($r['numero_compte']) && preg_match('/^5[0-9]{5}$/', $r['numero_compte'])) {
+                            $is5_debit = true;
                         }
-                    } catch (Exception $e) {
-                        // ignore et laissera les fallbacks ci-dessous
-                    }
-
-                    // Fallback si non trouvé: priorité 530000 Caisse, 512000 Banque, sinon tout 5xxxx, sinon compte_debit
-                    if (empty($tres_compte_id)) {
-                        $stmt = $pdo->query("SELECT id FROM comptes_comptables WHERE numero_compte IN ('530000','512000') ORDER BY FIELD(numero_compte,'530000','512000') LIMIT 1");
-                        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                        if ($row && !empty($row['id'])) {
-                            $tres_compte_id = (int)$row['id'];
-                        } else {
-                            $stmt = $pdo->query("SELECT id FROM comptes_comptables WHERE numero_compte LIKE '5%' ORDER BY numero_compte LIMIT 1");
-                            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                            $tres_compte_id = isset($row['id']) ? (int)$row['id'] : $compte_debit;
+                        if ((int)$r['id'] === $compte_credit && isset($r['numero_compte']) && preg_match('/^5[0-9]{5}$/', $r['numero_compte'])) {
+                            $is5_credit = true;
                         }
                     }
 
-                    // Déterminer un moyen de paiement par défaut si non fourni (Espèces sinon premier)
+                    // Déterminer un moyen de paiement par défaut (conservé pour compatibilité avec les listes)
                     $moyen_paiement_id = $_POST['moyen_paiement_id'] ?? null;
                     if (empty($moyen_paiement_id)) {
-                        $stmt = $pdo->prepare("SELECT id FROM moyens_paiement WHERE nom = ? LIMIT 1");
-                        $stmt->execute(['Espèces']);
-                        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                        if ($row && !empty($row['id'])) {
-                            $moyen_paiement_id = $row['id'];
-                        } else {
-                            $stmt = $pdo->query("SELECT id FROM moyens_paiement ORDER BY id LIMIT 1");
-                            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                            $moyen_paiement_id = $row['id'] ?? null;
+                        try {
+                            $stmtTmp = $pdo->prepare("SELECT id FROM moyens_paiement WHERE nom = ? LIMIT 1");
+                            $stmtTmp->execute(['Espèces']);
+                            $rowTmp = $stmtTmp->fetch(PDO::FETCH_ASSOC);
+                            if ($rowTmp && !empty($rowTmp['id'])) {
+                                $moyen_paiement_id = $rowTmp['id'];
+                            } else {
+                                $stmtTmp = $pdo->query("SELECT id FROM moyens_paiement ORDER BY id LIMIT 1");
+                                $rowTmp = $stmtTmp->fetch(PDO::FETCH_ASSOC);
+                                $moyen_paiement_id = $rowTmp['id'] ?? null;
+                            }
+                        } catch (Exception $e) {
+                            $moyen_paiement_id = null;
                         }
                     }
 
-                    // Catégorie par défaut
+                    $date_operation = $_POST['date_operation'];
+                    $libelle = $_POST['libelle'];
+                    $numero_piece = $_POST['numero_piece'] ?? '';
+                    $beneficiaire = $_POST['beneficiaire'] ?? '';
                     $categorie = $_POST['categorie'] ?? 'autre';
+                    $utilisateur = $_SESSION['user_nom'];
 
-                    // Enregistrement dans la table tresorerie (conserve un seul compte côté trésorerie pour les soldes Banque/Caisse)
-                    $stmt = $pdo->prepare("
+                    // Préparer l'insert
+                    $stmtIns = $pdo->prepare("
                         INSERT INTO tresorerie 
                         (compte_id, date_operation, libelle, montant, type_operation, moyen_paiement_id, 
                          numero_piece, beneficiaire, categorie, utilisateur) 
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ");
-                    $stmt->execute([
-                        $tres_compte_id,
-                        $_POST['date_operation'],
-                        $_POST['libelle'],
-                        $montant,
-                        $type_operation,
-                        $moyen_paiement_id,
-                        $_POST['numero_piece'] ?? '',
-                        $_POST['beneficiaire'] ?? '',
-                        $categorie,
-                        $_SESSION['user_nom']
-                    ]);
 
-                    $message_succes = "Opération de trésorerie ajoutée avec succès !";
+                    // Règles:
+                    // - Si les deux comptes sont de trésorerie (classe 5): transfert interne => 2 écritures
+                    //      * compte_debit: ENTREE
+                    //      * compte_credit: SORTIE
+                    // - Si un seul est classe 5:
+                    //      * classe5 = compte_debit => ENTREE
+                    //      * classe5 = compte_credit => SORTIE
+                    // - Sinon: pas d'écriture de trésorerie (aucun compte de classe 5)
+                    $nbInserts = 0;
+                    if ($is5_debit && $is5_credit) {
+                        // Entrée sur le débité (augmentation de l'actif de trésorerie)
+                        $stmtIns->execute([$compte_debit, $date_operation, $libelle, $montant, 'entree', $moyen_paiement_id, $numero_piece, $beneficiaire, $categorie, $utilisateur]);
+                        // Sortie sur le crédité (diminution de l'actif de trésorerie)
+                        $stmtIns->execute([$compte_credit, $date_operation, $libelle, $montant, 'sortie', $moyen_paiement_id, $numero_piece, $beneficiaire, $categorie, $utilisateur]);
+                        $nbInserts = 2;
+                    } elseif ($is5_debit) {
+                        // Uniquement sur le débité: entrée
+                        $stmtIns->execute([$compte_debit, $date_operation, $libelle, $montant, 'entree', $moyen_paiement_id, $numero_piece, $beneficiaire, $categorie, $utilisateur]);
+                        $nbInserts = 1;
+                    } elseif ($is5_credit) {
+                        // Uniquement sur le crédité: sortie
+                        $stmtIns->execute([$compte_credit, $date_operation, $libelle, $montant, 'sortie', $moyen_paiement_id, $numero_piece, $beneficiaire, $categorie, $utilisateur]);
+                        $nbInserts = 1;
+                    } else {
+                        // Aucun compte de trésorerie -> ne rien insérer dans tresorerie
+                        $nbInserts = 0;
+                    }
+
+                    if ($nbInserts === 0) {
+                        $message_succes = "Aucun compte de trésorerie (classe 5) détecté: aucune opération de trésorerie enregistrée.";
+                    } elseif ($nbInserts === 2) {
+                        $message_succes = "Transfert de trésorerie enregistré (caisse/banque mis à jour).";
+                    } else {
+                        $message_succes = "Opération de trésorerie enregistrée.";
+                    }
                     break;
                     
                 case 'valider_ecriture':
@@ -902,7 +864,7 @@ try {
                             <i class="fas fa-plus mr-2"></i>Écriture Comptable
                         </button> -->
                         <button onclick="ouvrirModalTresorerie()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                            <i class="fas fa-money-bill-wave mr-2"></i>Opération Trésorerie
+                            <i class="fas fa-money-bill-wave mr-2"></i>Ecriture Comptable
                         </button>
                         <!-- <button onclick="ouvrirModalBudget()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
                             <i class="fas fa-chart-line mr-2"></i>Budget
@@ -929,7 +891,7 @@ try {
                 <!-- Formulaire simple -->
                 <div class="bg-white rounded-lg shadow p-6">
                     <h3 class="text-lg font-semibold text-gray-900 mb-4">
-                        <i class="fas fa-receipt mr-2 text-blue-600"></i>Ecriture comptable (simple)
+                        <i class="fas fa-receipt mr-2 text-blue-600"></i>Opération trésorerie (simple)
                     </h3>
                     <form method="POST" class="grid grid-cols-1 gap-4">
                         <input type="hidden" name="action" value="ajouter_tresorerie">
@@ -1661,20 +1623,20 @@ try {
         </div>
     </div>
 
-    <!-- Modal Trésorerie -->
+    <!-- Modal Trésorerie MODIFIÉ - Retirer moyen de paiement, catégorie et bénéficiaire -->
     <div id="modalTresorerie" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
         <div class="flex items-center justify-center min-h-screen px-4">
             <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl">
                 <div class="px-6 py-4 border-b border-gray-200">
                     <div class="flex items-center justify-between">
-                        <h3 class="text-lg font-semibold text-gray-900">Nouvelle Opération de Trésorerie</h3>
+                        <h3 class="text-lg font-semibold text-gray-900">Nouvelle Ecriture Comptable</h3>
                         <button onclick="fermerModalTresorerie()" class="text-gray-400 hover:text-gray-600">
                             <i class="fas fa-times text-xl"></i>
                         </button>
                     </div>
                 </div>
                 
-                <form method="POST" class="p-6" id="formTresorerieSimple">
+                <form method="POST" class="p-6">
                     <input type="hidden" name="action" value="ajouter_tresorerie">
                     
                     <div class="grid grid-cols-2 gap-4 mb-4">
@@ -1693,10 +1655,10 @@ try {
                         </div>
                     </div>
                     
-                    <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Compte <span class="text-red-500">*</span></label>
-                            <select name="compte_id" required 
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Compte débité <span class="text-red-500">*</span></label>
+                            <select name="compte_debit" required 
                                     class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <option value="">Sélectionner un compte</option>
                                 <?php foreach ($comptes as $compte): ?>
@@ -1706,7 +1668,18 @@ try {
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Compte crédité <span class="text-red-500">*</span></label>
+                            <select name="compte_credit" required 
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">Sélectionner un compte</option>
+                                <?php foreach ($comptes as $compte): ?>
+                                    <option value="<?= $compte['id'] ?>">
+                                        <?= $compte['numero_compte'] ?> - <?= $compte['nom_compte'] ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
                     </div>
                     
                     <div class="grid grid-cols-2 gap-4 mb-4">
@@ -1715,22 +1688,17 @@ try {
                             <input type="number" name="montant" step="0.01" min="0.01" required 
                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
-                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Numéro du reçu</label>
+                            <input type="text" name="numero_piece" placeholder="Ex: R-2025-00123"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
                     </div>
                     
-                    <div class="mb-4">
+                    <div class="mb-6">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Libellé <span class="text-red-500">*</span></label>
                         <input type="text" name="libelle" required 
                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    </div>
-                    
-                    <div class="grid grid-cols-2 gap-4 mb-6">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">N° Pièce</label>
-                            <input type="text" name="numero_piece" 
-                                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        </div>
-                        
                     </div>
                     
                     <div class="flex justify-end space-x-3">
@@ -2522,6 +2490,7 @@ try {
             </div>
         </div>
     </div>
+
 <script>
 // Fallback robuste pour Détails imprimables avec filtre de mois et titre dynamique
 (function(){
@@ -2692,120 +2661,6 @@ try {
         }
     };
 })();
-
-// Injection des champs Compte débité / Compte crédité dans la modale Trésorerie
-function setupDualAccountFields() {
-    try {
-        const form = document.querySelector('#modalTresorerie form[action], #modalTresorerie form');
-        if (!form) return;
-
-        // Ne le faire qu'une seule fois
-        if (form.__dualAccountsInstalled) return;
-
-        // Trouver l'ancien select compte_id
-        const selectCompte = form.querySelector('select[name="compte_id"]');
-        if (!selectCompte) return;
-
-        // Construire deux nouveaux selects
-        const wrap = document.createElement('div');
-        wrap.className = 'grid grid-cols-1 md:grid-cols-2 gap-4 mb-4';
-        wrap.innerHTML = `
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">Compte débité <span class="text-red-500">*</span></label>
-                <select name="compte_debit" required
-                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="">Sélectionner un compte</option>
-                </select>
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">Compte crédité <span class="text-red-500">*</span></label>
-                <select name="compte_credit" required
-                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="">Sélectionner un compte</option>
-                </select>
-            </div>
-        `;
-
-        // Insérer le bloc juste avant le groupe qui contenait compte_id + moyen_paiement
-        const group = selectCompte.closest('.grid');
-        if (group && group.parentNode) {
-            group.parentNode.insertBefore(wrap, group);
-        } else {
-            // sinon, insérer au début du formulaire
-            form.insertBefore(wrap, form.firstChild);
-        }
-
-        // Peupler les options depuis window.ACCOUNTS
-        const debitSel = wrap.querySelector('select[name="compte_debit"]');
-        const creditSel = wrap.querySelector('select[name="compte_credit"]');
-        const accounts = Array.isArray(window.ACCOUNTS) ? window.ACCOUNTS : [];
-        accounts.forEach(acc => {
-            const opt1 = document.createElement('option');
-            opt1.value = acc.id;
-            opt1.textContent = `${acc.numero_compte} - ${acc.nom_compte}`;
-            debitSel.appendChild(opt1);
-
-            const opt2 = document.createElement('option');
-            opt2.value = acc.id;
-            opt2.textContent = `${acc.numero_compte} - ${acc.nom_compte}`;
-            creditSel.appendChild(opt2);
-        });
-
-        // Désactiver et masquer l'ancien select compte_id (conservé pour compat éventuelle)
-        selectCompte.removeAttribute('required');
-        selectCompte.name = '_compte_id_disabled';
-        selectCompte.style.display = 'none';
-
-        form.__dualAccountsInstalled = true;
-    } catch (e) {
-        console.warn('setupDualAccountFields error', e);
-    }
-}
-
-// Initialisation: injecter les nouveaux champs à l'ouverture de la page
-document.addEventListener('DOMContentLoaded', function () {
-    setupDualAccountFields();
-});
-</script>
-<script>
-// Soumission AJAX de la modale Trésorerie vers stockage JSON côté serveur
-document.addEventListener('DOMContentLoaded', function () {
-    const form = document.getElementById('formTresorerieSimple');
-    if (!form) return;
-    form.addEventListener('submit', async function (e) {
-        e.preventDefault();
-        const fd = new FormData(form);
-        // Mapper les champs du formulaire existant vers l'API JSON simple
-        const payload = new FormData();
-        payload.set('date_op', fd.get('date_operation') || '');
-        payload.set('type_op', fd.get('type_operation') || 'entree');
-        payload.set('libelle', fd.get('libelle') || '');
-        payload.set('montant', fd.get('montant') || '');
-        payload.set('numero_piece', fd.get('numero_piece') || '');
-        // notes optionnel (non présent dans le formulaire)
-        payload.set('notes', '');
-
-        try {
-            const resp = await fetch('comptabilite.php', {
-                method: 'POST',
-                body: payload
-            });
-            const data = await resp.json();
-            if (data && data.success) {
-                alert('Opération enregistrée.');
-                form.reset();
-                fermerModalTresorerie && fermerModalTresorerie();
-                // Optionnel: recharger pour rafraîchir l'historique si alimenté par DB
-                // location.reload();
-            } else {
-                alert('Erreur: ' + (data && data.message ? data.message : 'Enregistrement impossible.'));
-            }
-        } catch (err) {
-            console.error(err);
-            alert('Une erreur technique est survenue.');
-        }
-    });
-});
 </script>
 </body>
 </html>
