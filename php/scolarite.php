@@ -1197,7 +1197,12 @@ if (typeof window.Swal === 'undefined') {
             alert([title, msg].filter(Boolean).join('\n'));
             return Promise.resolve({});
         },
-        showLoading: function() { /* noop */ }
+        showLoading: function() { /* noop */ },
+        close: function() { /* noop */ }
+    };
+    // certaines implémentations utilisent "swal" en minuscule
+    window.swal = window.Swal;
+}
     };
 }
 
