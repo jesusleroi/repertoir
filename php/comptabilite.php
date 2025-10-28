@@ -864,11 +864,11 @@ try {
                             <i class="fas fa-plus mr-2"></i>Écriture Comptable
                         </button> -->
                         <button onclick="ouvrirModalTresorerie()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                            <i class="fas fa-money-bill-wave mr-2"></i>Ecriture Comptable
-                        </button>
-                        <!-- <button onclick="ouvrirModalBudget()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                            <i class="fas fa-chart-line mr-2"></i>Budget
-                        </button> -->
+                           <<i class="fas fa-money-bill-wave mr"></</i>Opération Trésorerie
+                      </bubutton>
+                       <-button onclick="ouvrirTransfert()" class="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                           < i class="fas fa-right-left mr"></lii>Transfert Caisse ↔ Banque
+                       n> -->
                     </div>
                 </div>
             </div>
@@ -1269,8 +1269,9 @@ try {
                                                         <?= $operation['type_operation'] === 'entree' ? '+' : '-' ?><?= formatMontantFG($operation['montant']) ?>
                                                     </td>
                                                     <td class="px-6 py-4 whitespace-nowrap">
-                                                        <span class="px-2 py-1 text-xs rounded-full <?= $operation['type_operation'] === 'entree' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' ?>">
-                                                            <?= ucfirst($operation['categorie']) ?>
+                                                        <?php $isTrans = ($operation['categorie'] === 'transfert_interne'); ?>
+                                                        <span class="px-2 py-1 text-xs rounded-full <?= $isTrans ? 'bg-blue-100 text-blue-800' : ($operation['type_operation'] === 'entree' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800') ?>">
+                                                            <?= $isTrans ? 'Transfert' : ucfirst($operation['categorie']) ?>
                                                         </span>
                                                     </td>
                                                     <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -1914,12 +1915,35 @@ try {
         }
         
         function ouvrirModalTresorerie() {
-            document.getElementById('modalTresorerie').classList.remove('hidden');
-        }
-        
+            const modal = document.getElementById('modalTresorerie');
+            modal.classList.remove('hidden');
+            // Réinitialiser l'état de transfert si nécessaire (ré-afficher le type)
+            try {
+                const form = modal.querySelector('form');
+                if (form) {
+                    const typeSel = form.querySelector('select[name="type_operation"]');
+                    if (typeSel) {
+                        const group = typeSel.closest('div');
+                        if (group) group.style.display = '';
+                        type        
         function fermerModalTresorerie() {
             document.getElementById('modalTresorerie').classList.add('hidden');
         }
+
+        // Ouvre la modale en mode "Transfert" (Caisse -> Banque ou inverse)
+        function ouvrirTransfert() {
+            ouvrirModalTresorerie();
+            try {
+                setupDualAccountFields();
+                const form = document.querySelector('#modalTresorerie form');
+                if (!form) return;
+
+                // Masquer le champ Type (déterminé automatiquement par le couple des comptes)
+                const typeSel = form.querySelector('select[name="type_operation"]');
+                if (typeSel) {
+                    const group = typeSel.closest('div');
+                    if (group) group.style.display = 'none';
+                    type }
         
         function ouvrirModalBudget() {
             document.getElementById('modalBudget').classList.remove('hidden');
