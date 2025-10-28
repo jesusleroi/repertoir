@@ -868,7 +868,8 @@ try {
                       </bubutton>
                        <-button onclick="ouvrirTransfert()" class="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
                            < i class="fas fa-right-left mr"></lii>Transfert Caisse ↔ Banque
-                       n> -->
+                      </> but_codetonewn</>
+-->
                     </div>
                 </div>
             </div>
@@ -1915,17 +1916,51 @@ try {
         }
         
         function ouvrirModalTresorerie() {
-            const modal = document.getElementById('modalTresorerie');
-            modal.classList.remove('hidden');
-            // Réinitialiser l'état de transfert si nécessaire (ré-afficher le type)
             try {
+                const modal = document.getElementById('modalTresorerie');
+                if (!modal) return;
                 const form = modal.querySelector('form');
                 if (form) {
+                    // Réinitialiser les champs
+                    if (typeof form.reset === 'function') form.reset();
+
+                    // Date du jour si vide
+                    const dateInput = form.querySelector('input[name="date_operation"]');
+                    if (dateInput && !dateInput.value) {
+                        const t = new Date();
+                        const y = t.getFullYear();
+                        const m = String(t.getMonth() + 1).padStart(2, '0');
+                        const d = String(t.getDate()).padStart(2, '0');
+                        dateInput.value = `${y}-${m}-${d}`;
+                    }
+
+                    // Afficher et réactiver le sélecteur Type (peut être masqué en mode transfert)
                     const typeSel = form.querySelector('select[name="type_operation"]');
                     if (typeSel) {
                         const group = typeSel.closest('div');
                         if (group) group.style.display = '';
-                        type        
+                        typeSel.disabled = false;
+                    }
+
+                    // Nettoyer le flag transfert
+                    const transferFlag = form.querySelector('input[name="is_transfer"]');
+                    if (transferFlag) transferFlag.value = '';
+
+                    // S'assurer que les champs Débit/Crédit sont présents
+                    if (typeof setupDualAccountFields === 'function') {
+                        setupDualAccountFields();
+                    }
+
+                    // Focus sur le libellé
+                    const libelle = form.querySelector('input[name="libelle"]');
+                    if (libelle) setTimeout(() => libelle.focus(), 0);
+                }
+                modal.classList.remove('hidden');
+            } catch (e) {
+                console.warn('ouvrirModalTresorerie error', e);
+            }
+        }
+        
         function fermerModalTresorerie() {
             document.getElementById('modalTresorerie').classList.add('hidden');
         }
