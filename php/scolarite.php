@@ -1188,6 +1188,19 @@ try {
 <script>
 const TYPE_LABELS = { scolarite:'Scolarité', assurance:'Assurance', apeae:'APEAE', cantine:'Cantine', bus:'Bus', fournitures:'Fournitures' };
 
+// Fallback minimal pour Swal si non chargé
+if (typeof window.Swal === 'undefined') {
+    window.Swal = {
+        fire: function(opts) {
+            const title = (opts && opts.title) ? opts.title : '';
+            const msg = (opts && (opts.text || '')) ? (opts.text || '') : '';
+            alert([title, msg].filter(Boolean).join('\n'));
+            return Promise.resolve({});
+        },
+        showLoading: function() { /* noop */ }
+    };
+}
+
 // Nouvelle fonction pour imprimer le dernier reçu
 function imprimerDernierRecu(eleveId, classe, annee) {
     // Afficher un indicateur de chargement
